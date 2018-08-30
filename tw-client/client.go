@@ -2,11 +2,9 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/tls"
 	"flag"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -15,7 +13,6 @@ import (
 	"syscall"
 
 	"github.com/willxm/throughwall/config"
-	"github.com/willxm/throughwall/cryptogram"
 	"github.com/willxm/throughwall/util"
 )
 
@@ -59,27 +56,13 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	conns := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
 
-	reader := bufio.NewReader(conns)
+	r.Header.Add("realto", r.RequestURI)
 
 	log.Println(r.RequestURI)
 
-	requestBody, err := ioutil.ReadAll(reader)
-
-	if err != nil {
-		panic(err)
-	}
-
-	reqData, err := cryptogram.AesEncrypt(requestBody, []byte(c.Password))
-	if err != nil {
-		panic(err)
-	}
-
-	bf := bytes.NewBuffer(reqData)
-
-	r.Body = ioutil.NopCloser(bf)
-
 	r.Write(conns)
 
+	reader := bufio.NewReader(conns)
 	resp, err := http.ReadResponse(reader, r)
 	if err != nil {
 		return
@@ -87,29 +70,9 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	for k, v := range resp.Header {
 		for _, vv := range v {
-			data, err := cryptogram.AesDecrypt([]byte(vv), []byte(c.Password))
-			if err != nil {
-				panic(err)
-			}
-			w.Header().Add(k, string(data))
+			w.Header().Add(k, vv)
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-
-	resqbody, err := ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		panic(err)
-	}
-
-	respData, err := cryptogram.AesDecrypt(resqbody, []byte(c.Password))
-	if err != nil {
-		panic(err)
-	}
-
-	rbf := bytes.NewBuffer(respData)
-
-	resp.Body = ioutil.NopCloser(rbf)
-
 	io.Copy(w, resp.Body)
 }

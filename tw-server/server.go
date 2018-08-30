@@ -1,17 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
-
-	"github.com/willxm/throughwall/cryptogram"
 
 	"github.com/willxm/throughwall/config"
 	"github.com/willxm/throughwall/util"
@@ -55,53 +53,31 @@ type Server struct {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	realurl := r.Header.Get("realto")
 
-	//decode
-	data, err := ioutil.ReadAll(r.Body)
+	su := strings.Split(realurl, ":")
+	if len(su) > 1 && su[1] == "443" {
+		realurl = "https://" + su[0]
+	}
+
+	log.Println(realurl)
+
+	req, err := http.NewRequest(r.Method, realurl, r.Body)
 	if err != nil {
 		panic(err)
 	}
-	decryptReq, err := cryptogram.AesDecrypt(data, []byte(s.Password))
-	if err != nil {
-		panic(err)
-	}
-
-	bf := bytes.NewBuffer(decryptReq)
-
-	r.Body = ioutil.NopCloser(bf)
-
-	req, err := http.NewRequest(r.Method, r.URL.String(), r.Body)
 	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		panic(err)
+	}
 	for k, v := range resp.Header {
+
 		for _, vv := range v {
-			data, err := cryptogram.AesEncrypt([]byte(vv), []byte(s.Password))
-			if err != nil {
-				panic(err)
-			}
-			w.Header().Add(k, string(data))
+			w.Header().Add(k, vv)
 		}
 	}
-	if err != nil {
-		panic(err)
-	}
 
-	log.Println("test conn")
-
-	resqData, err := ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		panic(err)
-	}
-
-	encryptResp, err := cryptogram.AesEncrypt(resqData, []byte(s.Password))
-	if err != nil {
-		panic(err)
-	}
-
-	rbf := bytes.NewBuffer(encryptResp)
-
-	resp.Body = ioutil.NopCloser(rbf)
-
+	data, _ := ioutil.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	w.WriteHeader(resp.StatusCode)
 	w.Write(data)
